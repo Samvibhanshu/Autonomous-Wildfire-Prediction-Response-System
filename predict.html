@@ -1,0 +1,34 @@
+{% extends "base.html" %}{% block title %}Predict · Wildfire Risk{% endblock %}
+{% block body %}
+<div class="grid2"><div class="card"><h2>What-if risk assessment</h2>
+<p class="muted">Enter conditions for one zone. Nothing is logged. The result shows each model, the aggregated risk, and what the orchestration agent would do with today's resources.</p>
+<div class="row"><div><label>Preset<select id="preset"><option value="">Choose…</option><option value="aug">Hot dry August afternoon</option><option value="mar">Cool wet March day</option><option value="sep">Windy September, dry fuels</option><option value="bad">Faulty sensor reading (rejected)</option></select></label></div></div>
+<div class="row" style="margin-top:8px"><div><label>X (1-9)<input id="X" type="number" min="1" max="9" value="5"></label></div><div><label>Y (2-9)<input id="Y" type="number" min="2" max="9" value="5"></label></div>
+<div><label>Month<select id="month">{% for m in ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'] %}<option>{{m}}</option>{% endfor %}</select></label></div>
+<div><label>Day<select id="day">{% for d in ['mon','tue','wed','thu','fri','sat','sun'] %}<option>{{d}}</option>{% endfor %}</select></label></div></div>
+<div class="row" style="margin-top:8px">{% for f,u in [('temp','°C'),('RH','% humidity'),('wind','km/h'),('rain','mm')] %}<div><label>{{f}} <span class="muted">{{u}}</span><input id="{{f}}" type="number" step="0.1"></label></div>{% endfor %}</div>
+<div class="row" style="margin-top:8px">{% for f in ['FFMC','DMC','DC','ISI'] %}<div><label>{{f}} <span class="muted">{{ '%g' % ranges[f][0] }}-{{ '%g' % ranges[f][1] }}</span><input id="{{f}}" type="number" step="0.1"></label></div>{% endfor %}</div>
+<p class="muted">FFMC, DMC, DC and ISI are Canadian Fire Weather Index components; the model was trained with them as inputs.</p>
+<button id="go">Assess risk</button><div class="err" id="err"></div></div>
+<div class="card" id="out"><h2>Result</h2><div class="muted">Run an assessment.</div></div></div>
+<script>
+const $ = (id) => document.getElementById(id); const esc = (s) => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const F = ['X','Y','month','day','temp','RH','wind','rain','FFMC','DMC','DC','ISI'];
+const P = { aug:{X:6,Y:5,month:'aug',day:'sat',temp:30,RH:22,wind:4.5,rain:0,FFMC:93,DMC:170,DC:700,ISI:12}, mar:{X:3,Y:4,month:'mar',day:'tue',temp:9,RH:70,wind:3,rain:1.2,FFMC:75,DMC:20,DC:80,ISI:2},
+  sep:{X:8,Y:6,month:'sep',day:'sun',temp:26,RH:30,wind:8.5,rain:0,FFMC:92,DMC:150,DC:720,ISI:14}, bad:{X:5,Y:5,month:'aug',day:'mon',temp:95,RH:22,wind:4,rain:0,FFMC:90,DMC:100,DC:600,ISI:9} };
+$('preset').onchange = () => { const p = P[$('preset').value]; if (p) F.forEach(k => $(k).value = p[k]); };
+$('preset').value = 'aug'; $('preset').onchange();
+$('go').onclick = async () => {
+  $('err').textContent = ''; const body = {}; F.forEach(k => body[k] = ['month','day'].includes(k) ? $(k).value : $(k).value === '' ? null : Number($(k).value));
+  const r = await fetch('/api/predict', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); const j = await r.json();
+  if (!r.ok) { $('err').textContent = (j.error.details || [{field:'',message:j.error.message}]).map(d => d.field + ': ' + d.message).join(' · '); return; }
+  const a = j.assessment, d = j.decision;
+  const pm = Object.entries(a.per_model).map(([n, p]) => `<div><span class="n">${n.replace('_', ' ')}</span><div class="bar"><i style="width:${p * 100}%"></i></div><span>${p.toFixed(2)}</span></div>`).join('');
+  const alloc = Object.entries(d.allocated).map(([k, v]) => `${v} ${k.replace('_', ' ')}`).join(', ') || 'none';
+  $('out').innerHTML = `<h2>Result</h2><span class="badge b-${a.level}" style="font-size:15px">${a.level}</span> <b>${(a.probability * 100).toFixed(0)}%</b> ensemble fire probability
+   <div class="gauge"><i style="left:calc(${a.probability * 100}% - 2px)"></i></div><div class="muted">Confidence ${a.confidence.toFixed(2)} (models ${a.unanimous ? 'agree' : 'disagree'} on which side of 50%)</div>
+   <h3>Per model</h3><div class="models">${pm}</div><h3>What the orchestration agent would do</h3><div><b>${esc(d.mode)}</b>. ${esc(d.reason)}</div><div class="muted">Resources: ${esc(alloc)}</div>
+   <ul>${d.actions.map(x => `<li>${esc(x.type)}</li>`).join('') || '<li class="muted">none</li>'}</ul>${a.warnings.length ? '<h3>Warnings</h3><ul>' + a.warnings.map(w => `<li class="muted">${esc(w)}</li>`).join('') + '</ul>' : ''}
+   <p class="muted">A probability near 50% is what this model produces for most inputs; see the Model page for how much weight that deserves.</p>`;
+};
+</script>{% endblock %}

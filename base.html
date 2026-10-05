@@ -1,0 +1,9 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Wildfire Risk{% endblock %}</title><link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}"></head>
+<body><header><b>🔥 Wildfire Risk &amp; Response</b>
+<nav><a href="/" class="{{ 'on' if request.path=='/' }}">Dashboard</a><a href="/predict" class="{{ 'on' if request.path=='/predict' }}">Predict</a><a href="/model" class="{{ 'on' if request.path=='/model' }}">Model &amp; evidence</a></nav>
+<span class="ver">model {{ version }}</span></header><main>
+<div class="banner"><b>Prototype, simulation mode.</b> Trained on 517 historical records from one Portuguese park (Montesinho, 2000-2003).
+{% if metrics %}Measured skill is modest: about {{ '%.0f' % (metrics.cross_validation.results.ensemble.accuracy.mean*100) }}% accuracy in cross-validation, against {{ '%.0f' % (metrics.cross_validation.majority_baseline_accuracy*100) }}% for always guessing the majority class.{% endif %}
+No real drones, trucks or alerts are controlled; every "action" is a logged simulation.</div>
+{% block body %}{% endblock %}</main></body></html>

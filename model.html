@@ -1,0 +1,34 @@
+{% extends "base.html" %}{% block title %}Model · Wildfire Risk{% endblock %}
+{% block body %}{% if not m %}<div class="card">metrics.json not found. Run <code>python train.py</code>.</div>{% else %}
+{% set cv = m.cross_validation.results %}
+<div class="card"><h2>What was measured</h2>
+<div class="kpi"><div><b>{{ '%.1f' % (cv.ensemble.accuracy.mean*100) }}%</b>ensemble accuracy, cross-validated (±{{ '%.1f' % (cv.ensemble.accuracy.std*100) }})</div>
+<div><b>{{ '%.1f' % (m.cross_validation.majority_baseline_accuracy*100) }}%</b>accuracy of always predicting the majority class</div>
+<div><b>{{ '%.2f' % cv.ensemble.auc.mean }}</b>ensemble AUC, cross-validated (0.50 = chance)</div>
+<div><b>{{ m.dataset.records }}</b>records, {{ '%.0f' % (m.dataset.positive_rate*100) }}% with a fire</div></div>
+<p class="muted">Section 8.5 of the patent disclosure lists projected accuracy of 90-95%, precision ~0.90 and recall ~0.92. Those are projections for a future sensor deployment. They are not measured here, and this prototype does not support them. The measured numbers above are what the code produces, and this page reads them from <code>metrics.json</code> so it cannot drift from the training run.</p></div>
+
+<div class="card"><h2>Single 70/15/15 split (as in disclosure section 8.1)</h2><p class="muted">Test set is only {{ m.split.test }} records, so treat these as very noisy: the 95% intervals are wide, and different random seeds move AUC by ±0.05 or more.</p>
+<table><tr><th>Model</th><th>Accuracy</th><th>Precision</th><th>Recall</th><th>F1</th><th>AUC (95% CI)</th></tr>
+{% for n,r in m.test.items() %}<tr><td>{{ n.replace('_',' ') }}</td><td>{{ '%.3f' % r.accuracy }}</td><td>{{ '%.2f' % r.precision }}</td><td>{{ '%.2f' % r.recall }}</td><td>{{ '%.2f' % r.f1 }}</td><td>{{ '%.3f' % r.auc }} ({{ '%.2f' % r.auc_ci95[0] }}-{{ '%.2f' % r.auc_ci95[1] }})</td></tr>{% endfor %}</table>
+<p class="muted">Majority-class baseline accuracy on this test split: {{ '%.3f' % m.test_majority_baseline_accuracy }}.</p></div>
+
+<div class="card"><h2>{{ m.cross_validation.scheme }}</h2><p class="muted">Every record is used for testing several times, so this is the steadier estimate.</p>
+<table><tr><th>Model</th><th>Accuracy (mean ± sd)</th><th>AUC (mean ± sd)</th></tr>
+{% for n,r in cv.items() %}<tr><td>{{ n.replace('_',' ') }}</td><td>{{ '%.3f' % r.accuracy.mean }} ± {{ '%.3f' % r.accuracy.std }}</td><td>{{ '%.3f' % r.auc.mean }} ± {{ '%.3f' % r.auc.std }}</td></tr>{% endfor %}</table></div>
+
+<div class="card"><h2>Risk levels and the confidence gate</h2><p class="muted">Out-of-fold predictions: how often a fire was actually recorded at each level.</p>
+<table><tr><th>Level</th><th>Records</th><th>Observed fire rate</th></tr>
+{% for lv,r in m.confidence_gating.by_level.items() %}<tr><td><span class="badge b-{{lv}}">{{lv}}</span></td><td>{{ r.n }}</td><td>{{ ('%.0f%%' % (r.observed_fire_rate*100)) if r.observed_fire_rate is not none else '-' }}</td></tr>{% endfor %}</table>
+<p class="muted">Base rate across all records: {{ '%.0f%%' % (m.confidence_gating.base_rate*100) }}.</p>
+<h3>Does requiring the models to agree reduce false alarms?</h3>
+<table><tr><th>HIGH/CRITICAL alerts</th><th>Alerts</th><th>Precision</th><th>False alarm rate</th></tr>
+{% for k,r in m.confidence_gating.alerts.items() %}<tr><td>{{ k }}</td><td>{{ r.n }}</td><td>{{ ('%.2f' % r.precision) if r.precision is not none else '-' }}</td><td>{{ ('%.2f' % r.false_alarm_rate) if r.false_alarm_rate is not none else '-' }}</td></tr>{% endfor %}</table>
+<p class="muted">On this data the gate changes alert precision very little. It still does its safety job (disagreeing models never trigger autonomous deployment), but this dataset does not show a measurable false-alarm reduction.</p></div>
+
+<div class="card"><h2>Figures (disclosure figures 8-15)</h2><div class="figs">{% for f,t in figures.items() %}<figure style="margin:0"><img src="/figures/{{f}}" alt="{{t}}" loading="lazy"></figure>{% endfor %}</div></div>
+<div class="card"><h2>Known limits</h2><ul class="muted"><li>{{ m.dataset.records }} records from one park over four years. Nothing here has been validated on other regions, sensors or seasons.</li>
+<li>The burned-area label mixes tiny and huge events into one "fire" class, and the inputs are weather indices only (no vegetation, ignition sources or human activity).</li>
+<li>CNN (satellite imagery) and LSTM (time series) models from the disclosure are not implemented: the prototype dataset has neither images nor sequences.</li>
+<li>{{ m.dataset.duplicates }} exact duplicate rows are kept, as in the original dataset; a random split can put a copy on each side.</li></ul></div>
+{% endif %}{% endblock %}

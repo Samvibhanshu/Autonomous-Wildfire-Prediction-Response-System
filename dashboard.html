@@ -1,0 +1,73 @@
+{% extends "base.html" %}{% block title %}Dashboard · Wildfire Risk{% endblock %}
+{% block body %}
+<div class="card"><h2>Run a scenario</h2>
+<p class="muted">Sensors are simulated: baseline conditions come from real historical records for this month, then the scenario perturbs them (disclosure section 8.7).</p>
+<div class="row">
+ <div><label>Scenario<select id="scenario">{% for k,v in scenarios.items() %}<option value="{{k}}">{{v.label}}</option>{% endfor %}</select></label></div>
+ <div><label>Zones to sample<input id="zonesN" type="number" min="1" max="72" value="16"></label></div>
+ <div style="flex:0"><button id="run">Run cycle</button></div>
+</div><div class="err" id="err"></div><div class="muted" id="scDesc"></div></div>
+
+<div class="grid2"><div>
+ <div class="card"><h2>Zone risk map <span class="muted">(park grid, X 1-9 across, Y 2-9 down)</span></h2>
+  <div class="zones" id="zones" style="grid-template-columns:repeat({{ gx|length }},1fr)"></div>
+  <div class="legend"><span><span class="badge b-NONE">no data</span></span>{% for l in levels %}<span><span class="badge b-{{l}}">{{l}}</span></span>{% endfor %}<span>⚠ = models disagree, human review</span></div>
+ </div>
+ <div class="card"><h2>Latest decisions</h2><div id="decisions" class="muted">Run a cycle to see decisions.</div></div>
+</div><div>
+ <div class="card"><h2>Zone detail</h2><div id="detail" class="muted">Click a zone.</div></div>
+ <div class="card"><h2>Resource availability</h2><div id="resources"></div>
+  <h3>Take a resource out of service</h3>
+  <div class="row"><div><select id="resType"></select></div><div><input id="resN" type="number" min="0" value="0"></div><div style="flex:0"><button class="ghost" id="resSet">Set</button></div></div></div>
+</div></div>
+<div class="card"><h2>Recent predictions</h2><div id="log" class="muted"></div></div>
+
+<script>
+const LEVELS = {{ levels|tojson }}, GX = {{ gx|tojson }}, GY = {{ gy|tojson }}, SC = {{ scenarios|tojson }};
+const $ = (id) => document.getElementById(id); const esc = (s) => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let zones = {}, sel = null;
+const badge = (l) => `<span class="badge b-${l}">${l}</span>`;
+async function api(path, opts) { const r = await fetch(path, opts); const j = await r.json(); if (!r.ok) throw new Error(j.error ? (j.error.details ? j.error.details.map(d => d.field + ': ' + d.message).join('; ') : j.error.message) : 'Request failed'); return j; }
+
+function drawGrid() {
+  $('zones').innerHTML = GY.map(y => GX.map(x => { const z = zones[`X${x}-Y${y}`];
+    return `<div class="cell ${z ? 'c-' + z.level : ''} ${sel === `X${x}-Y${y}` ? 'sel' : ''}" data-z="X${x}-Y${y}" title="X${x}, Y${y}${z ? ': ' + z.level + ' (' + z.probability.toFixed(2) + ')' : ''}" tabindex="0" role="button" aria-label="Zone X${x} Y${y}${z ? ' ' + z.level : ' no data'}">${z ? z.level[0] : ''}${z && z.mode === 'HUMAN_REVIEW' ? '<span class="hr">⚠</span>' : ''}</div>`; }).join('')).join('');
+  document.querySelectorAll('.cell').forEach(c => { c.onclick = () => { sel = c.dataset.z; drawGrid(); detail(); }; c.onkeydown = (e) => { if (e.key === 'Enter') c.click(); }; });
+}
+function detail() {
+  const z = zones[sel]; if (!z) { $('detail').innerHTML = `<span class="muted">${sel ? esc(sel) + ': no data yet.' : 'Click a zone.'}</span>`; return; }
+  const pm = Object.entries(z.per_model).map(([n, p]) => `<div><span class="n">${n.replace('_', ' ')}</span><div class="bar"><i style="width:${p * 100}%"></i></div><span>${p.toFixed(2)}</span></div>`).join('');
+  const acts = (z.actions || []).map(a => `<li>${esc(a.type)} <span class="muted">${esc(a.status)}</span></li>`).join('') || '<li class="muted">none</li>';
+  const alloc = Object.entries(z.allocated || {}).map(([k, v]) => `${v} ${k.replace('_', ' ')}`).join(', ') || 'none';
+  $('detail').innerHTML = `<b>${esc(z.zone_id)}</b> ${badge(z.level)}<div class="muted">p = ${z.probability.toFixed(2)} · confidence ${z.confidence.toFixed(2)} · ${esc(z.source)}</div>
+   <div class="models">${pm}</div><h3>Decision: ${esc(z.mode || '-')}</h3><div class="muted">${esc(z.reason || '')}</div>
+   <div class="muted">Allocated: ${esc(alloc)}</div><ul>${acts}</ul>
+   ${(z.warnings || []).length ? '<h3>Warnings</h3><ul>' + z.warnings.map(w => `<li class="muted">${esc(w)}</li>`).join('') + '</ul>' : ''}
+   <h3>Record what happened</h3><div class="row"><div style="flex:0"><button class="ghost" onclick="outcome(${z.id},1)">Fire occurred</button></div><div style="flex:0"><button class="ghost" onclick="outcome(${z.id},0)">No fire</button></div></div>
+   <div class="muted">Real outcomes are the only thing that can retrain the model (POST /api/retrain).</div>`;
+}
+window.outcome = async (id, fire) => { try { const r = await api('/api/outcomes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prediction_id: id, observed_fire: fire }) }); $('detail').insertAdjacentHTML('beforeend', `<div class="muted">Saved. ${r.labelled_examples} labelled example(s) so far.</div>`); } catch (e) { $('err').textContent = e.message; } };
+
+function drawDecisions(ds) {
+  if (!ds || !ds.length) return;
+  $('decisions').innerHTML = '<table><tr><th>Zone</th><th>Level</th><th>p</th><th>Mode</th><th>Allocated</th><th>Note</th></tr>' + ds.map(d =>
+    `<tr><td>${esc(d.zone_id)}</td><td>${badge(d.level)}</td><td>${d.probability.toFixed(2)}</td><td>${esc(d.mode)}</td><td>${esc(Object.entries(d.allocated).map(([k, v]) => v + ' ' + k.replace('_', ' ')).join(', ') || '-')}</td><td class="muted">${esc(d.reason)}</td></tr>`).join('') + '</table>';
+}
+function drawResources(r) {
+  $('resources').innerHTML = Object.entries(r).map(([k, v]) => `<div class="res"><div class="top"><span>${k.replace('_', ' ')}</span><span>${v.free} free · ${v.committed} committed · ${v.out_of_service} out of service · ${v.total} total</span></div><div class="bar"><i style="width:${v.total ? v.free / v.total * 100 : 0}%"></i></div></div>`).join('');
+  if (!$('resType').options.length) $('resType').innerHTML = Object.keys(r).map(k => `<option value="${k}">${k.replace('_', ' ')}</option>`).join('');
+}
+async function refresh() {
+  const [z, r, l] = await Promise.all([api('/api/zones'), api('/api/resources'), api('/api/logs/predictions?limit=12')]);
+  zones = Object.fromEntries(z.zones.map(x => [x.zone_id, x])); drawGrid(); detail(); drawResources(r);
+  $('log').innerHTML = l.length ? '<table><tr><th>#</th><th>Zone</th><th>Level</th><th>p</th><th>Conf.</th><th>Source</th></tr>' + l.map(p => `<tr><td>${p.id}</td><td>${esc(p.zone_id)}</td><td>${badge(p.level)}</td><td>${p.probability.toFixed(2)}</td><td>${p.confidence.toFixed(2)}</td><td>${esc(p.source)}</td></tr>`).join('') + '</table>' : 'No predictions yet.';
+}
+$('run').onclick = async () => {
+  $('err').textContent = ''; $('run').disabled = true;
+  try { const r = await api('/api/simulate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scenario: $('scenario').value, zones: Number($('zonesN').value) }) }); await refresh(); drawDecisions(r.decisions); drawResources(r.resources); }
+  catch (e) { $('err').textContent = e.message; } finally { $('run').disabled = false; }
+};
+$('resSet').onclick = async () => { try { drawResources(await api('/api/resources', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: $('resType').value, out_of_service: Number($('resN').value) }) })); $('err').textContent = ''; } catch (e) { $('err').textContent = e.message; } };
+$('scenario').onchange = () => $('scDesc').textContent = SC[$('scenario').value].desc; $('scDesc').textContent = SC[$('scenario').value].desc;
+refresh();
+</script>{% endblock %}
