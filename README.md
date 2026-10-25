@@ -3,12 +3,12 @@
 [![tests](https://github.com/Samvibhanshu/Autonomous-Wildfire-Prediction-Response-System/actions/workflows/ci.yml/badge.svg)](https://github.com/Samvibhanshu/Autonomous-Wildfire-Prediction-Response-System/actions/workflows/ci.yml)
 
 ML pipeline plus Flask dashboard for the IDF-B disclosure *"Autonomous Wildfire Risk Prediction and Resource-Orchestrated
-Response Pattern"* (TRL 4). Python, scikit-learn, Flask, SQLite. 66 tests.
+Response Pattern"* (TRL 4). Python, scikit-learn, Flask, SQLite. 71 tests.
 
 ```bash
 python -m venv .venv && source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-python -m pytest -q                                       # ~10 s; trains a small model on the real data
+python -m pytest -q                                       # about 30 s; trains a small model on the real data
 python train.py                                           # ~1 min: tuning, cross-validation, figures 8-15, artifacts/
 python run.py                                             # dashboard at http://127.0.0.1:5000
 ```
