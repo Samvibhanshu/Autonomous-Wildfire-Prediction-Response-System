@@ -14,6 +14,14 @@ FEATURES = ["X", "Y", "month", "day", "FFMC", "DMC", "DC", "ISI", "temp", "RH", 
 
 # Risk levels (disclosure: LOW / MODERATE / HIGH / CRITICAL). Probability cut-offs are design parameters,
 # not tuned to flatter the metrics; the model page reports the fire rate actually observed at each level.
+# Domain knowledge baked into the models: with everything else fixed, a hotter, drier, windier day can never be
+# scored as LESS likely to burn. FFMC/DMC/DC/ISI are the Canadian Fire Weather Index components, which are built to
+# increase with dryness and spread potential; rain and relative humidity suppress fire. X/Y/month/day are
+# unconstrained (location and season effects are not monotone). Passed to the tree models as monotonic_cst.
+MONOTONIC_UP = ("FFMC", "DMC", "DC", "ISI", "temp", "wind")
+MONOTONIC_DOWN = ("RH", "rain")
+MONOTONIC_CST = [1 if f in MONOTONIC_UP else -1 if f in MONOTONIC_DOWN else 0 for f in FEATURES]
+
 LEVELS = ["LOW", "MODERATE", "HIGH", "CRITICAL"]
 LEVEL_CUTOFFS = (0.35, 0.55, 0.70)      # p < 0.35 LOW, < 0.55 MODERATE, < 0.70 HIGH, else CRITICAL
 

@@ -5,26 +5,26 @@ from pathlib import Path
 import joblib
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
+from sklearn.ensemble import HistGradientBoostingClassifier, RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
 from .aggregator import Assessment, aggregate
-from .config import ARTIFACTS, FEATURES, SEED
+from .config import ARTIFACTS, FEATURES, MONOTONIC_CST, SEED
 
 MODEL_NAMES = ["random_forest", "gradient_boosting", "logistic_regression"]
 
 DEFAULT_PARAMS = {
     "random_forest": {"n_estimators": 300, "min_samples_leaf": 3, "max_features": "sqrt"},
-    "gradient_boosting": {"n_estimators": 100, "learning_rate": 0.05, "max_depth": 2},
+    "gradient_boosting": {"max_iter": 100, "learning_rate": 0.05, "max_depth": 3},
     "logistic_regression": {"C": 1.0},
 }
 
 PARAM_GRIDS = {
     "random_forest": [{"n_estimators": n, "min_samples_leaf": l, "max_features": f}
                       for n in (200, 400) for l in (1, 3, 5) for f in ("sqrt", 0.5)],
-    "gradient_boosting": [{"n_estimators": n, "learning_rate": lr, "max_depth": d}
+    "gradient_boosting": [{"max_iter": n, "learning_rate": lr, "max_depth": d}
                           for n in (100, 200) for lr in (0.03, 0.1) for d in (2, 3)],
     "logistic_regression": [{"C": c} for c in (0.01, 0.1, 1.0, 10.0)],
 }
@@ -32,10 +32,10 @@ PARAM_GRIDS = {
 
 def build(name: str, params: dict | None = None, seed: int = SEED):
     p = dict(DEFAULT_PARAMS[name], **(params or {}))
-    if name == "random_forest":
-        return RandomForestClassifier(random_state=seed, n_jobs=-1, **p)
-    if name == "gradient_boosting":
-        return GradientBoostingClassifier(random_state=seed, **p)
+    if name == "random_forest":                          # monotone in the fire-weather features (see config.MONOTONIC_*)
+        return RandomForestClassifier(random_state=seed, n_jobs=-1, monotonic_cst=MONOTONIC_CST, **p)
+    if name == "gradient_boosting":                      # histogram-based, so it can enforce the same constraints
+        return HistGradientBoostingClassifier(random_state=seed, min_samples_leaf=20, monotonic_cst=MONOTONIC_CST, **p)
     if name == "logistic_regression":                    # scaling matters here (section 8.1)
         return make_pipeline(StandardScaler(), LogisticRegression(max_iter=2000, **p))
     raise KeyError(name)

@@ -1,5 +1,7 @@
 # Autonomous Wildfire Risk Prediction and Resource-Orchestrated Response: prototype
 
+[![tests](https://github.com/Samvibhanshu/Autonomous-Wildfire-Prediction-Response-System/actions/workflows/ci.yml/badge.svg)](https://github.com/Samvibhanshu/Autonomous-Wildfire-Prediction-Response-System/actions/workflows/ci.yml)
+
 ML pipeline plus Flask dashboard for the IDF-B disclosure *"Autonomous Wildfire Risk Prediction and Resource-Orchestrated
 Response Pattern"* (TRL 4). Python, scikit-learn, Flask, SQLite. 66 tests.
 
@@ -7,7 +9,7 @@ Response Pattern"* (TRL 4). Python, scikit-learn, Flask, SQLite. 66 tests.
 python -m venv .venv && source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 python -m pytest -q                                       # ~10 s; trains a small model on the real data
-python train.py                                           # ~45 s: tuning, cross-validation, figures 8-15, artifacts/
+python train.py                                           # ~1 min: tuning, cross-validation, figures 8-15, artifacts/
 python run.py                                             # dashboard at http://127.0.0.1:5000
 ```
 `artifacts/` ships with a trained model and all figures, so `python run.py` works immediately.
@@ -19,10 +21,10 @@ the real thing on the disclosure's own experiment (UCI Forest Fires, fire = area
 
 | | Single 70/15/15 split (test n = 78) | 5-fold x 10 repeats, all 517 records |
 |---|---|---|
-| Random Forest | acc 0.667, AUC 0.72 | acc 0.581 ± 0.036, AUC 0.599 ± 0.042 |
-| Gradient Boosting | acc 0.641, AUC 0.68 | acc 0.564 ± 0.041, AUC 0.568 ± 0.047 |
+| Random Forest | acc 0.679, AUC 0.67 | acc 0.580 ± 0.039, AUC 0.596 ± 0.052 |
+| Gradient Boosting | acc 0.641, AUC 0.70 | acc 0.564 ± 0.035, AUC 0.593 ± 0.045 |
 | Logistic Regression | acc 0.603, AUC 0.61 | acc 0.547 ± 0.043, AUC 0.551 ± 0.051 |
-| Ensemble (mean) | acc 0.641, AUC 0.71 (95% CI 0.58-0.83) | acc 0.579 ± 0.039, AUC 0.583 ± 0.045 |
+| Ensemble (mean) | acc 0.641, AUC 0.70 (95% CI 0.58-0.82) | acc 0.572 ± 0.039, AUC 0.595 ± 0.047 |
 | Always predict majority class | 0.513 | 0.522 |
 
 The models beat chance, but modestly. The 78-row test split is optimistic and very noisy; cross-validation is the steadier
@@ -30,11 +32,10 @@ estimate. This dataset is known to be hard (the original authors also found weak
 
 * *Ensemble/confidence gating reduces false alarms:* not visible here. HIGH/CRITICAL alert precision is 0.62 for all alerts and 0.61 for
   confident-only alerts. The gate still guarantees that disagreeing models never trigger autonomous deployment.
-* *Ensemble beats single models:* in cross-validation the mean ensemble is about equal to Random Forest alone.
-* *Feature importance = temperature, wind, DMC:* temperature and DMC rank in the top 3 (with RH); wind ranks 8th of 12. Importances are
-  fairly flat (0.09-0.15 for most features) and impurity importance is biased, so treat the ranking loosely.
-* Fire rate observed at each risk level (out-of-fold): LOW 33%, MODERATE 47%, HIGH 64%, CRITICAL 57%. Higher levels do mean more fires,
-  but CRITICAL is not clearly riskier than HIGH.
+* *Ensemble beats single models:* in cross-validation the mean ensemble is about equal to Random Forest or Gradient Boosting alone (AUC 0.595 vs 0.596 / 0.593; the spread between folds is about 0.05).
+* *Feature importance = temperature, wind, DMC:* not supported. In the Random Forest the largest impurity importances belong to park-grid position (X, Y) and calendar (day, month), which together carry about 0.80 of the total; temperature is 5th and DMC 6th (about 0.04 and 0.03 each), wind 8th, and rain last. Most of what little the model predicts comes from where and when, not from the weather. Impurity importance is biased toward features with many distinct values, so treat the ranking loosely.
+* Fire rate observed at each risk level (out-of-fold): LOW 27%, MODERATE 49%, HIGH 63%, CRITICAL 47%. Fire rate rises from LOW to HIGH,
+  but CRITICAL (only 15 cases) is not shown to be riskier than HIGH.
 
 `metrics.json` holds all of this and the dashboard's Model page and banner read from it, so the app cannot show stale or projected numbers.
 If you present this work, quote the measured figures and describe 8.5 as projections for a future sensor deployment.
@@ -45,7 +46,7 @@ If you present this work, quote the measured figures and describe 8.5 as project
 |---|---|---|
 | Sensing layer | `sensors.py` | **Simulated**: real historical records for the month, perturbed by a scenario (heatwave, dry spell, wind event, cool/wet). Labelled `simulated`. |
 | Data ingestion | `ingestion.py` | Schema and physical-range validation, timestamp validation and UTC sync, per-zone rolling-median spike filter, out-of-training-range warnings. |
-| ML prediction engine | `models.py`, `training.py`, `data.py` | RF, GB, LR exactly as in section 8. Hyper-parameters tuned on the validation split. |
+| ML prediction engine | `models.py`, `training.py`, `data.py` | RF, GB, LR as in section 8 (GB is scikit-learn's histogram gradient boosting so it can take monotonic constraints). Hyper-parameters tuned on the validation split. |
 | Risk Confidence Aggregator (claim 2) | `aggregator.py` | Mean probability -> LOW/MODERATE/HIGH/CRITICAL; confidence = 1 - spread between models. |
 | Resource Availability Manager | `orchestrator.py` | Fleet (drones, trucks, tankers, personnel, sprinklers), out-of-service tracking. |
 | AROA orchestration (claims 3-4) | `orchestrator.py` | Two-pass priority allocation under scarcity, shortfall reporting, human review when models disagree. |
@@ -55,6 +56,12 @@ If you present this work, quote the measured figures and describe 8.5 as project
 | Dashboard | `webapp.py`, `templates/` | Flask UI plus JSON API. |
 
 ## Design choices worth knowing
+
+* **Hotter / drier / windier can never mean lower risk.** RF and GB are trained with monotonic constraints on the fire-weather features
+  (`config.MONOTONIC_UP/DOWN`: FFMC, DMC, DC, ISI, temp, wind up; RH, rain down). The earlier unconstrained models had learned so little about dryness
+  that a simulated heatwave scored *lower than a cool, wet day* in 11 of 12 calendar months (the test passed only in August), which a fire-risk tool should not do. Constraining them costs nothing measurable
+  (cross-validated ensemble AUC 0.595 vs 0.583 before, well within the 0.05 fold-to-fold spread) and makes the property a guarantee that `tests/test_monotonicity.py` checks,
+  rather than something a noisy model happens to satisfy. Logistic regression is not constrained; it is a weak third voice in the ensemble.
 
 * **Simulation only.** Actions go through `SimulatedGateway`. Nothing controls real equipment. `ActuatorGateway` is the seam for real integrations.
 * **Evacuation advisories need sign-off.** The disclosure describes fully autonomous action; here `EVACUATION_ADVISORY` is drafted automatically but stays `PENDING_APPROVAL`. Edit `NEEDS_APPROVAL` in `orchestrator.py` to change that.
